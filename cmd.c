@@ -151,7 +151,7 @@ int find(const char* base_path, const char* filename, PathList *list) {
 }
 
 // Function to test the single board temperature sensor
-void testSingleBoardTemperatureSensor() {
+int testSingleBoardTemperatureSensor() {
     // Find the path of the "temp1_input" file
     const char* base_path = "/sys";
     const char* filename = "temp1_input";
@@ -161,7 +161,7 @@ void testSingleBoardTemperatureSensor() {
     // Check if the file was found
     if (list.count==0) {
         printf("Error: File 'temp1_input' not found.\n");
-        return;
+        return -1;
     }
 
     printf("Found %d files named '%s':\n", list.count, filename);
@@ -171,14 +171,14 @@ void testSingleBoardTemperatureSensor() {
         FILE *file = fopen(list.paths[i], "r");
         if (file == NULL) {
             printf("Error: Failed to open the temperature file \"%s\".\n",list.paths[i]);
-            return;
+            return -1;
         }
 
         char buffer[128];
         if (fgets(buffer, sizeof(buffer), file) == NULL) {
             printf("Error: Failed to read the temperature file \"%s\".\n",list.paths[i]);
             fclose(file);
-            return;
+            return -1;
         }
         fclose(file);
 
@@ -193,11 +193,13 @@ void testSingleBoardTemperatureSensor() {
 
     // Log success message
     printf("Temperature sensor test script completed successfully.");
+
+    return 0;
 }
 
 
 
-void testCPUInternalTemperatureSensor(void)
+int testCPUInternalTemperatureSensor(void)
 {
     // Find the path of the "temp1_input" file
     const char* base_path = "/sys";
@@ -208,7 +210,7 @@ void testCPUInternalTemperatureSensor(void)
     // Check if the file was found
     if (list.count==0) {
         printf("Error: File 'temp' not found.\n");
-        return;
+        return -1;
     }
 
     printf("Found %d files named '%s':\n", list.count, filename);
@@ -219,7 +221,7 @@ void testCPUInternalTemperatureSensor(void)
         FILE *file = fopen(list.paths[i], "r");
         if (file == NULL) {
             printf("Error: Failed to open the cpu temperature file \"%s\".\n",list.paths[i]);
-            return;
+            return -1;
         }
 
         
@@ -236,7 +238,7 @@ void testCPUInternalTemperatureSensor(void)
         }else{
             printf("Error: Failed to read the cpu temperature file \"%s\".\n",list.paths[i]);
             fclose(file);
-            return;
+            return -1;
         }
         fclose(file);
 
@@ -249,44 +251,168 @@ void testCPUInternalTemperatureSensor(void)
 
 
 
-// 实时时钟测试
-void testRealTimeClock(void)
-{
-    
+// 检查文件是否存在
+int file_exists(const char *path) {
+    struct stat buffer;
+    return stat(path, &buffer) == 0;
+}
+
+
+int testRealTimeClock(char *rtc_name,char* time_str) {
+    // 检查是否存在时钟设备
+    char clock_path[100];
+    sprintf(clock_path, "/dev/", rtc_name);
+    if (!file_exists(clock_path)) {
+        printf("Error: Clock device /dev/%s not found.",rtc_name);
+        return -1;
+    }
+
+    // 设置系统日期和时间
+    char date_command[100];
+    sprintf(date_command, "sudo date -s '%s'",time_str);
+    if (system(date_command) != 0) {
+        printf("Error: Failed to set system date and time to '%s'.\n",time_str);
+        return -1;
+    }
+
+    // 写入实时时钟
+    char hwclock_write_command[100];
+    sprintf(hwclock_write_command, "sudo hwclock -w -f /dev/", rtc_name);
+    if (system(date_command) != 0) {
+        printf("Error: Failed to write to real-time clock /dev/%s.\n",rtc_name);
+        return -1;
+    }
+
+    // 从实时时钟读取
+    char hwclock_read_command[100];
+    sprintf(hwclock_read_command, "sudo hwclock -r -f /dev/%s", rtc_name);
+    if (system(date_command) != 0) {
+        printf("Error: Failed to read from real-time clock /dev/%s.\n",rtc_name);
+        return -1;
+    }
+
+    printf("RTC test completed successfully.\n");
+    return 0;
 }
 
 // 硬件版本功能测试
-void testHardwareVersion(void);
+int testHardwareVersion(void);
 
 // LED测试
-void testLED(void);
+int testLED(void);
+
+
+
+
+
+
 
 // EMMC硬盘读写测试
-void testEMMCDiskReadWrite(void);
+int testEMMCDiskReadWrite(const char *target_disk_path, int test_times) {
+    // 卸载目标磁盘
+    printf("Unmounting disk %s...\n", target_disk_path);
+    char umount_cmd[100];
+    sprintf(umount_cmd, "umount %s", target_disk_path);
+    if (system(umount_cmd)!=0) {
+        printf("Error: Unmounting %s failed.\n",target_disk_path);
+        return -1;
+    }
+
+    // 格式化目标磁盘为ext4文件系统
+    printf("Formatting disk '%s' as ext4...\n", target_disk_path);
+    char mkfs_command[256];
+    snprintf(mkfs_command, "mkfs.ext4 '%s'", target_disk_path);
+    if (system(mkfs_command)!=0) {
+        printf("Error: Formatting %s failed.\n",target_disk_path);
+        return -1;
+    }
+
+    // 创建挂载目录
+    char mount_dir[256];
+    snprintf(mount_dir, "/mnt/%s", basename(target_disk_path));
+    printf("Creating mount directory '%s'...\n",mount_dir);
+
+    char mkdir_cmd[256];
+    snprintf(mkdir_cmd, "mkdir -p %s", mount_dir);
+    if (system(mkdir_cmd)!=0) {
+        printf("Error: Creating mount directory '%s' failed.\n", mount_dir);
+        return -1;
+    }
+
+    // 挂载目标磁盘到创建的目录
+    printf("Mounting disk %s to %s...\n",target_disk_path,mount_dir);
+    char mount_cmd[256];
+    snprintf(mount_cmd, "mount -t ext4 %s %s",target_disk_path, mount_dir);
+    if (system(mount_cmd)!=0) {
+        printf("Error: Mounting disk failed.\n");
+        return -1;
+    }
+
+    // 循环测试写入和读取
+    for (int i = 0; i < test_times; i++) {
+        // 使用dd写入目标磁盘并检查错误
+        printf("Writing to disk using dd at the %d time...\n",i+1);
+        char dd_write_command[256];
+        snprintf(dd_write_command, "dd if=/dev/zero of=\"%s/zero.a\" bs=1000M count=1", mount_dir);
+        if (system(dd_write_command)!=0) {
+            printf("Error: Writing to disk failed.");
+            return -1;
+        }
+
+        // 使用dd从目标磁盘读取并检查错误
+        printf("Reading from disk using dd at the %d time...\n");
+        char dd_read_command[256];
+        snprintf(dd_read_command, "dd if=\"%s/zero.a\" of=/dev/null bs=1000M count=1", mount_dir);
+        if (system(dd_read_command)!=0) {
+            printf("Error: Reading from disk failed.");
+            return -1;
+        }
+
+        // 删除测试文件
+        printf("Removing temp file at the %d time...\n");
+        char rm_command[256];
+        snprintf(rm_command, "rm -f %s/zero.a", mount_dir);
+        if (system(rm_command)!=0) {
+            printf("Error: Failed to remove test file.\n");
+            return -1;
+        }
+    }
+
+    // 卸载磁盘
+    printf("Unmounting disk...");
+    if (system(umount_cmd)!=0) {
+        printf("Error: Unmounting %s failed.\n",target_disk_path);
+        return -1;
+    }
+
+    printf("Disk test completed successfully.");
+    return 0;
+}
+
 
 // 背板第一路CAN通讯测试
-void testBackplaneFirstCANCommunication(void);
+int testBackplaneFirstCANCommunication(void);
 
 // 背板第二路CAN通讯测试
-void testBackplaneSecondCANCommunication(void);
+int testBackplaneSecondCANCommunication(void);
 
 // 背板第一路RS485通讯测试
-void testBackplaneFirstRS485Communication(void);
+int testBackplaneFirstRS485Communication(void);
 
 // 背板第二路RS485通讯测试
-void testBackplaneSecondRS485Communication(void);
+int testBackplaneSecondRS485Communication(void);
 
 // 背板千兆以太网通讯测试
-void testBackplaneGigabitEthernetCommunication(void);
+int testBackplaneGigabitEthernetCommunication(void);
 
 // 背板第一路USB2.0测试
-void testBackplaneFirstUSB20(void);
+int testBackplaneFirstUSB20(void);
 
 // 背板第二路USB2.0测试
-void testBackplaneSecondUSB20(void);
+int testBackplaneSecondUSB20(void);
 
 // 前面USB3.0测试
-void testFrontUSB30(void);
+int testFrontUSB30(void);
 
 
 
@@ -403,6 +529,7 @@ int main(int argc, char *argv[]) {
                 break;
             case 'R':
                 printf("实时时钟测试\n");;
+                testRealTimeClock("rtc0","2024-11-01 00:00:00");
                 break;
             case 'H':
                 printf("硬件版本功能测试\n");
